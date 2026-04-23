@@ -2,6 +2,7 @@
 
 process ENSEMBLVEP_VEP {
     label 'process_medium'
+    cpus "${forks}"
 
     input:
     tuple val(meta), path(vcf), val(buffer_size), val(forks)
@@ -14,6 +15,7 @@ process ENSEMBLVEP_VEP {
     output:
     tuple val(meta), path("*.vep.vcf.gz"), emit: vep_out
     tuple val(meta), path("*.vep.out"), emit: out_file
+    tuple val("${task.index}"), val("${meta.id}"), val(buffer_size), val(forks), emit: process_info
 
     script:
     def args = task.ext.args ?: ''
@@ -66,5 +68,8 @@ workflow {
 
     ENSEMBLVEP_VEP.out.vep_out.view()
     ENSEMBLVEP_VEP.out.out_file.view()
+    
+    ENSEMBLVEP_VEP.out.process_info
+        .collectFile(name: 'process-info.txt', newLine: true)
 
 }
