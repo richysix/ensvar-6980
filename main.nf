@@ -11,11 +11,13 @@ process ENSEMBLVEP_VEP {
     val cache_version
     path(cache)
     path(fasta)
+    each iter
 
     output:
     tuple val(meta), path("*.vep.vcf.gz"), emit: vep_out
     tuple val(meta), path("*.vep.out"), emit: out_file
     tuple val("${task.index}"), val("${meta.id}"), val(buffer_size), val(forks), emit: process_info
+    path("task-${task.index}-${iter}-params.csv"), emit: params_file
 
     script:
     def args = task.ext.args ?: ''
@@ -24,6 +26,8 @@ process ENSEMBLVEP_VEP {
     def dir_cache = cache ? "${cache}" : "/.vep"
     def reference = fasta ? "--fasta ${fasta}" : ""
     """
+    echo "${task.index},${iter},${meta.id},${buffer_size},${forks}" > task-${task.index}-${iter}-params.csv
+
     vep ${args} \\
         --i ${vcf} \\
         -o ${vep_out} \\
@@ -41,13 +45,28 @@ process ENSEMBLVEP_VEP {
     """
 }
 
+process COLLECT_PARAMS_DATA {
+    executor 'local'
+    publishDir 'reports', pattern: "task-params.csv", mode: 'copy'
+
+    input:
+    path("task-*-params.csv")
+
+    output:
+    path('task-params.csv')
+
+    script:
+    """
+    cat <( echo "task_id,iteration,sample_id,buffer_size,forks" ) task-*-params.csv > task-params.csv
+    """
+}
+
 workflow {
 
     main:
 
     ch_parameters = channel.fromList(params.buffer_size)
         .combine(channel.fromList(params.forks))
-        .view()
 
     ch_samplesheet = channel.fromPath(params.input)
             .splitCsv(header: true)
@@ -55,7 +74,8 @@ workflow {
                         [ [id: row.id], file(row.input_file) ]
             }
             .combine(ch_parameters)
-            .view()
+
+    loop = Channel.from(1..params.repeat)
 
     ENSEMBLVEP_VEP(
         ch_samplesheet,
@@ -63,13 +83,22 @@ workflow {
         params.species,
         params.cache_version,
         file(params.cache),
-        file(params.fasta)
+        file(params.fasta),
+        loop
     )
 
-    ENSEMBLVEP_VEP.out.vep_out.view()
-    ENSEMBLVEP_VEP.out.out_file.view()
-    
-    ENSEMBLVEP_VEP.out.process_info
-        .collectFile(name: 'process-info.txt', newLine: true)
+    ch_params_files = ENSEMBLVEP_VEP.out.params_file
+        .collect()
+    COLLECT_PARAMS_DATA(
+        ch_params_files
+    )
 
+    if (params.verbose) {
+        ch_parameters.view { x -> "Buffer size and forks: $x" }
+        ch_samplesheet.view { x -> "Input info: $x" }
+        ENSEMBLVEP_VEP.out.vep_out.view { x -> "VEP output vcf: $x" }
+        ENSEMBLVEP_VEP.out.out_file.view { x -> "VEP output file: $x" }
+        ENSEMBLVEP_VEP.out.process_info.view { x -> "Process info: $x" }
+        ENSEMBLVEP_VEP.out.params_file.view { x -> "Params file: $x" }
+    }
 }
