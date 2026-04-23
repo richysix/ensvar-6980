@@ -1,12 +1,5 @@
 #!/usr/bin/env nextflow
 
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    IMPORT FUNCTIONS / MODULES / SUBWORKFLOWS / WORKFLOWS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-//include { ENSEMBLVEP_VEP } from './modules/nf-core/ensemblvep/vep/main'
-
 process ENSEMBLVEP_VEP {
     label 'process_medium'
 
