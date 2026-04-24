@@ -17,7 +17,7 @@ process ENSEMBLVEP_VEP {
     tuple val(meta), path("*.vep.vcf.gz"), emit: vep_out
     tuple val(meta), path("*.vep.out"), emit: out_file
     tuple val("${task.index}"), val("${meta.id}"), val(buffer_size), val(forks), emit: process_info
-    path("task-${task.index}-${iter}-params.csv"), emit: params_file
+    path("task-${task.index}-${iter}-params.tsv"), emit: params_file
 
     script:
     def args = task.ext.args ?: ''
@@ -26,7 +26,7 @@ process ENSEMBLVEP_VEP {
     def dir_cache = cache ? "${cache}" : "/.vep"
     def reference = fasta ? "--fasta ${fasta}" : ""
     """
-    echo "${task.index},${iter},${meta.id},${buffer_size},${forks}" > task-${task.index}-${iter}-params.csv
+    echo -e "${task.index}\t${iter}\t${meta.id}\t${buffer_size}\t${forks}" > task-${task.index}-${iter}-params.tsv
 
     vep ${args} \\
         --i ${vcf} \\
@@ -47,17 +47,17 @@ process ENSEMBLVEP_VEP {
 
 process COLLECT_PARAMS_DATA {
     executor 'local'
-    publishDir 'reports', pattern: "task-params.csv", mode: 'copy'
+    publishDir 'reports', pattern: "task-params.tsv", mode: 'copy'
 
     input:
-    path("task-*-params.csv")
+    path("task-*-params.tsv")
 
     output:
-    path('task-params.csv')
+    path('task-params.tsv')
 
     script:
     """
-    cat <( echo "task_id,iteration,sample_id,buffer_size,forks" ) task-*-params.csv > task-params.csv
+    cat <( echo -e "task_id\titeration\tsample_id\tbuffer_size\tforks" ) task-*-params.tsv > task-params.tsv
     """
 }
 
