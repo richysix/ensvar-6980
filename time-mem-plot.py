@@ -1,28 +1,185 @@
-# /// script
-# requires-python = ">=3.14"
-# dependencies = []
-# ///
+#!/usr/bin/env python
 
 import argparse
+import polars as pl
+import datetime as dt
+from typing import TextIO
+import plotnine as p9
+#from great_tables import GT, md, html
 
-def main() -> None:
-    print("Hello from time-mem-plot.py!")
+def create_empty_job() -> dict:
+    return {
+        "Job ID": None,
+        "Cores": None,
+        "CPU Utilized": None,
+        "Job Wall-clock time": None,
+        "Memory Utilized": None,
+    }
+
+
+def add_job_to_jobinfo(current_job: dict, jobinfo: dict) -> dict:
+    for key in current_job.keys():
+        jobinfo[key].append(current_job[key]) # append to list
+    return jobinfo
+
+
+def time_string_to_delta(string: str) -> dt.timedelta:
+    h, m, s = [int(x) for x in string.split(":")]
+    return dt.timedelta(hours=h, minutes=m, seconds=s)
+
+
+def mem_string_to_gb(string: str) -> float:
+    multiplier = {
+        "GB": 1024 * 1024 * 1024,
+        "MB": 1024 * 1024,
+        "KB": 1024,
+    }
+    value, unit = string.split(" ")
+    bytes = float(value) * multiplier[unit]
+    return bytes / multiplier["GB"]
+
+
+def convert_data_types(jobinfo: dict) -> dict:
+    jobinfo["Job ID"] = [int(item) for item in jobinfo["Job ID"]]
+    jobinfo["CPU Utilized"] = [time_string_to_delta(item) for item in jobinfo["CPU Utilized"]]
+    jobinfo["Job Wall-clock time"] = [time_string_to_delta(item) for item in jobinfo["Job Wall-clock time"]]
+    jobinfo["Memory Utilized"] = [mem_string_to_gb(item) for item in jobinfo["Memory Utilized"]]
+    return jobinfo
+
+
+def parse_seff_file(seff_fh: TextIO) -> dict:
+    jobinfo = {
+        "Job ID": [],
+        "Cores": [],
+        "CPU Utilized": [],
+        "Job Wall-clock time": [],
+        "Memory Utilized": [],
+    }
+    current_job = create_empty_job()
+    for line in seff_fh:
+        if line == "\n":
+            continue
+        category, value = line.rstrip().split(": ")
+        if category == "Job ID":
+            # new record
+            # add job to jobinfo dict
+            if current_job["Job ID"] is not None:
+                jobinfo = add_job_to_jobinfo(current_job, jobinfo)
+                # new empty job
+                current_job = create_empty_job()
+        elif category == "Cores per node":
+            category = "Cores"
+
+        if category in current_job:
+            current_job[category] = value
+
+    jobinfo = add_job_to_jobinfo(current_job, jobinfo)
+    jobinfo = convert_data_types(jobinfo)
+
+    return jobinfo
+
+
+def main(args: dict) -> None:
+    # load and parse seff file
+    with open(args.seff_file) as seff_fh:
+        jobinfo = parse_seff_file(seff_fh)
+    df_jobinfo = pl.DataFrame(jobinfo)
+    df_jobinfo = df_jobinfo.rename({"Memory Utilized": "Memory Utilized (GB)"})
+
+    # load trace file
+    trace = pl.read_csv(args.trace_file, separator="\t")
+
+    # load params file
+    params = pl.read_csv(
+        args.task_params_file,
+        separator="\t",
+    )
+    # work out categories
+    buffer_categories = [str(buffer) for buffer in sorted(set(params["buffer_size"].to_list()))]
+    fork_categories = [str(fork) for fork in sorted(set(params["forks"].to_list()))]
+    # reload data with categories
+    params = pl.read_csv(
+        args.task_params_file,
+        separator="\t",
+        schema_overrides={
+            "buffer_size": pl.Enum(buffer_categories),
+            "forks": pl.Enum(fork_categories)
+        }
+    )
+
+    # join all 3 together
+    df_all = params.join(
+        trace, on="task_id"
+    ).join(
+        df_jobinfo,
+        left_on="native_id",
+        right_on="Job ID"
+    )
+    # output combined table
+    df_all.write_csv(f"{args.output_base}.tsv", separator="\t")
+
+    df_subset = df_all.filter(pl.col("sample_id") == "NA12878-chr1")
+
+    # plot time amd mem stats
+    time_boxplot = (
+        p9.ggplot(data=df_subset,
+            mapping=p9.aes(x="buffer_size", y="Job Wall-clock time", fill="buffer_size"))
+            + p9.geom_boxplot()
+            + p9.geom_point()
+            + p9.scale_fill_manual(values=("#0073B3", "#CC6600"))
+            + p9.facet_wrap("forks")
+    )
+    time_boxplot.save(f"{args.output_base}.time.png")
+
+    mem_boxplot = (
+        p9.ggplot(data=df_subset,
+            mapping=p9.aes(x="buffer_size", y="Memory Utilized (GB)", fill="buffer_size"))
+            + p9.geom_boxplot()
+            + p9.geom_point()
+            + p9.scale_fill_manual(values=("#0073B3", "#CC6600"))
+            + p9.facet_wrap("forks")
+    )
+    mem_boxplot.save(f"{args.output_base}.mem.png")
+
+    time_table = (
+        df_subset
+            .group_by(("buffer_size", "forks"))
+            .agg(
+                pl.min("Job Wall-clock time").alias("Min(time)").dt.to_string("polars"),
+                pl.median("Job Wall-clock time").alias("Median(time)").dt.total_seconds(fractional=True).round(0, mode="half_away_from_zero").mul(1_000_000).cast(pl.Duration("us")).dt.to_string("polars"),
+                pl.max("Job Wall-clock time").alias("Max(time)").dt.to_string("polars")
+            )
+            .sort("buffer_size", "forks")
+    )
+    print(time_table)
+    #GT(time_table)
+
+    mem_table = (
+        df_subset
+            .group_by(("buffer_size", "forks"))
+            .agg(
+                pl.min("Memory Utilized (GB)").alias("Min(mem)"),
+                pl.median("Memory Utilized (GB)").alias("Median(mem)"),
+                pl.max("Memory Utilized (GB)").alias("Max(mem)")
+            )
+    )
+    print(mem_table)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='')
-    parser.add_argument('input_files', nargs='*', metavar='FILE',
-        type=str, default=sys.stdin, 
-        help='Input matrix files')
-    parser.add_argument('--output_base', metavar='OUT FILE BASE',
-        type=str, default="agg", 
-        help='Base file name for the output networks')
-    parser.add_argument('--annotation', metavar='ANNOTATION FILE',
-        type=str, default="annotation.txt", 
-        help='Gene annotation file')
-    parser.add_argument('--orderings', metavar='INT',
-        type=int, default=10, 
-        help='Number of different file orderings to do')
+    parser.add_argument('trace_file', metavar='TRACE_FILE',
+        type=str, default='reports/trace.txt',
+        help='Input trace file')
+    parser.add_argument('task_params_file', metavar='TASK_PARAMS_FILE',
+        type=str, default='reports/task-params.tsv',
+        help='Input task parameters file')
+    parser.add_argument('seff_file', metavar='SEFF_FILE',
+        type=str, default='output.seff',
+        help='Input seff file')
+    parser.add_argument('--output_base', metavar='OUTFILE_BASE',
+        type=str, default="time-mem",
+        help='Base file name for the output files')
     parser.add_argument('--debug', action='count', default=0,
         help='Prints debugging information')
     params = parser.parse_args()
