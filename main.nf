@@ -5,7 +5,7 @@ process ENSEMBLVEP_VEP {
     cpus "${forks}"
 
     input:
-    tuple val(meta), path(vcf), val(buffer_size), val(forks)
+    tuple val(meta), path(vcf), val(buffer_size), val(forks), val(options)
     val assembly
     val species
     val cache_version
@@ -16,7 +16,7 @@ process ENSEMBLVEP_VEP {
     output:
     tuple val(meta), path("*.vep.vcf.gz"), emit: vep_out
     tuple val(meta), path("*.vep.out"), emit: out_file
-    tuple val("${task.index}"), val("${meta.id}"), val(buffer_size), val(forks), emit: process_info
+    tuple val("${task.index}"), val("${meta.id}"), val(buffer_size), val(forks), val(options), emit: process_info
     path("task-${task.index}-${iter}-params.tsv"), emit: params_file
 
     script:
@@ -25,12 +25,13 @@ process ENSEMBLVEP_VEP {
     def out_file = "${meta.id}.vep.out"
     def dir_cache = cache ? "${cache}" : "/.vep"
     def reference = fasta ? "--fasta ${fasta}" : ""
+    def option_string = options == "" ? "None" : options
     """
-    echo -e "${task.index}\t${iter}\t${meta.id}\t${buffer_size}\t${forks}" > task-${task.index}-${iter}-params.tsv
+    echo -e "${task.index}\t${iter}\t\$SLURM_JOB_NODELIST\t${meta.id}\t${buffer_size}\t${forks}\t${option_string}" > task-${task.index}-${iter}-params.tsv
 
-    vep ${args} \\
-        --i ${vcf} \\
-        -o ${vep_out} \\
+    vep ${args} ${options} \\
+        --input_file ${vcf} \\
+        --output_file ${vep_out} \\
         --buffer_size ${buffer_size} \\
         --fork ${forks} \\
         --offline --vcf --compress_output bgzip \\
@@ -42,6 +43,13 @@ process ENSEMBLVEP_VEP {
         --stats_text \\
         --fasta ${fasta} \\
         > ${out_file} 2>&1
+    """
+
+    stub:
+    def option_string = options == "" ? "None" : options
+    """
+    echo -e "${task.index}\t${iter}\t\$SLURM_JOB_NODELIST\t${meta.id}\t${buffer_size}\t${forks}\t${option_string}" > task-${task.index}-${iter}-params.tsv
+    touch "${meta.id}.vep.vcf.gz" "${meta.id}.vep.out"
     """
 }
 
@@ -57,7 +65,7 @@ process COLLECT_PARAMS_DATA {
 
     script:
     """
-    cat <( echo -e "task_id\titeration\tsample_id\tbuffer_size\tforks" ) task-*-params.tsv > task-params.tsv
+    cat <( echo -e "task_id\titeration\tnode\tsample_id\tbuffer_size\tforks\toptions" ) task-*-params.tsv > task-params.tsv
     """
 }
 
@@ -67,6 +75,7 @@ workflow {
 
     ch_parameters = channel.fromList(params.buffer_size)
         .combine(channel.fromList(params.forks))
+        .combine(channel.fromList(params.options))
 
     ch_samplesheet = channel.fromPath(params.input)
             .splitCsv(header: true)
