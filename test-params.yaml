@@ -1,0 +1,11 @@
+input: "samplesheet-1.csv"
+buffer_size:
+    - 5000
+    - 10000
+forks:
+    - 1
+    - 8
+options:
+    - ""
+    - "--everything"
+repeat: 2
