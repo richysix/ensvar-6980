@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#     "plotnine>=0.15.3",
+#     "polars>=1.40.1",
+#     "pyarrow>=24.0.0",
+# ]
+# ///
 
 import argparse
 import polars as pl
@@ -105,6 +113,8 @@ def main(args: dict) -> None:
             "buffer_size": pl.Enum(buffer_categories),
             "forks": pl.Enum(fork_categories)
         }
+    ).with_columns(
+        pl.col("sample_id").str.replace(r"^.*\-", "")
     )
 
     # join all 3 together
@@ -116,58 +126,77 @@ def main(args: dict) -> None:
         right_on="Job ID"
     )
     # output combined table
-    df_all.write_csv(f"{args.output_base}.tsv", separator="\t")
+    (
+        df_all
+            .with_columns(pl.col(pl.Duration).dt.to_string(format="polars"))
+            .write_csv(f"{args.output_base}-results.tsv", separator="\t")
+    )
 
-    df_subset = df_all.filter(pl.col("sample_id") == "NA12878-chr1")
+#    df_subset = df_all.filter(pl.col("sample_id") == "NA12878-chr1")
 
     # plot time amd mem stats
     time_boxplot = (
-        p9.ggplot(data=df_subset,
-            mapping=p9.aes(x="buffer_size", y="Job Wall-clock time", fill="buffer_size"))
+        p9.ggplot(data=df_all,
+            mapping=p9.aes(x="buffer_size", y="Job Wall-clock time", fill="options"))
             + p9.geom_boxplot()
             + p9.geom_point()
             + p9.scale_fill_manual(values=("#0073B3", "#CC6600"))
             + p9.facet_wrap("forks")
     )
-    time_boxplot.save(f"{args.output_base}.time.png")
+
+    time_boxplot.save(
+        f"{args.output_base}.time.png",
+        width=6,
+        height=4,
+        dpi=200
+    )
 
     mem_boxplot = (
-        p9.ggplot(data=df_subset,
-            mapping=p9.aes(x="buffer_size", y="Memory Utilized (GB)", fill="buffer_size"))
+        p9.ggplot(data=df_all,
+            mapping=p9.aes(x="buffer_size", y="Memory Utilized (GB)", fill="options"))
             + p9.geom_boxplot()
             + p9.geom_point()
             + p9.scale_fill_manual(values=("#0073B3", "#CC6600"))
             + p9.facet_wrap("forks")
     )
-    mem_boxplot.save(f"{args.output_base}.mem.png")
+    mem_boxplot.save(
+        f"{args.output_base}.mem.png",
+        width=6,
+        height=4,
+        dpi=200
+    )
 
     time_table = (
-        df_subset
-            .group_by(("buffer_size", "forks"))
+        df_all
+            .group_by(("sample_id", "buffer_size", "forks"))
             .agg(
                 pl.min("Job Wall-clock time").alias("Min(time)").dt.to_string("polars"),
                 pl.median("Job Wall-clock time").alias("Median(time)").dt.total_seconds(fractional=True).round(0, mode="half_away_from_zero").mul(1_000_000).cast(pl.Duration("us")).dt.to_string("polars"),
                 pl.max("Job Wall-clock time").alias("Max(time)").dt.to_string("polars")
             )
-            .sort("buffer_size", "forks")
+            .sort("sample_id", "buffer_size", "forks")
     )
     print(time_table)
     #GT(time_table)
 
     mem_table = (
-        df_subset
-            .group_by(("buffer_size", "forks"))
+        df_all
+            .group_by(("sample_id", "buffer_size", "forks"))
             .agg(
                 pl.min("Memory Utilized (GB)").alias("Min(mem)"),
                 pl.median("Memory Utilized (GB)").alias("Median(mem)"),
                 pl.max("Memory Utilized (GB)").alias("Max(mem)")
             )
+            .sort("sample_id", "buffer_size", "forks")
     )
     print(mem_table)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='')
+    parser = argparse.ArgumentParser(
+        description='Script to plot time and memory usage',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument('trace_file', metavar='TRACE_FILE',
         type=str, default='reports/trace.txt',
         help='Input trace file')
