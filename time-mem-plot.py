@@ -137,10 +137,10 @@ def main(args: dict) -> None:
     # plot time amd mem stats
     time_boxplot = (
         p9.ggplot(data=df_all,
-            mapping=p9.aes(x="buffer_size", y="Job Wall-clock time", fill="options"))
-            + p9.geom_boxplot()
-            + p9.geom_point()
-            + p9.scale_fill_manual(values=("#0073B3", "#CC6600"))
+            mapping=p9.aes(x="buffer_size", y="Job Wall-clock time", fill="factor(options, categories=('None', '--everything'))"))
+            + p9.geom_boxplot(outlier_shape="")
+            + p9.geom_point(position=p9.position_dodge2(width=0.5))
+            + p9.scale_fill_manual(name="Options", values=("#0073B3", "#CC6600"))
             + p9.facet_wrap("forks")
     )
 
@@ -153,10 +153,10 @@ def main(args: dict) -> None:
 
     mem_boxplot = (
         p9.ggplot(data=df_all,
-            mapping=p9.aes(x="buffer_size", y="Memory Utilized (GB)", fill="options"))
-            + p9.geom_boxplot()
-            + p9.geom_point()
-            + p9.scale_fill_manual(values=("#0073B3", "#CC6600"))
+            mapping=p9.aes(x="buffer_size", y="Memory Utilized (GB)", fill="factor(options, categories=('None', '--everything'))"))
+            + p9.geom_boxplot(outlier_shape="")
+            + p9.geom_point(position=p9.position_dodge2(width=0.5))
+            + p9.scale_fill_manual(name="Options", values=("#0073B3", "#CC6600"))
             + p9.facet_wrap("forks")
     )
     mem_boxplot.save(
@@ -168,7 +168,7 @@ def main(args: dict) -> None:
 
     time_table = (
         df_all
-            .group_by(("sample_id", "buffer_size", "forks"))
+            .group_by(("sample_id", "buffer_size", "forks", "options"))
             .agg(
                 pl.min("Job Wall-clock time").alias("Min(time)").dt.to_string("polars"),
                 pl.median("Job Wall-clock time").alias("Median(time)").dt.total_seconds(fractional=True).round(0, mode="half_away_from_zero").mul(1_000_000).cast(pl.Duration("us")).dt.to_string("polars"),
@@ -181,7 +181,7 @@ def main(args: dict) -> None:
 
     mem_table = (
         df_all
-            .group_by(("sample_id", "buffer_size", "forks"))
+            .group_by(("sample_id", "buffer_size", "forks", "options"))
             .agg(
                 pl.min("Memory Utilized (GB)").alias("Min(mem)"),
                 pl.median("Memory Utilized (GB)").alias("Median(mem)"),
@@ -204,7 +204,7 @@ if __name__ == "__main__":
         type=str, default='reports/task-params.tsv',
         help='Input task parameters file')
     parser.add_argument('seff_file', metavar='SEFF_FILE',
-        type=str, default='output.seff',
+        type=str, default='reports/output.seff',
         help='Input seff file')
     parser.add_argument('--output_base', metavar='OUTFILE_BASE',
         type=str, default="time-mem",
