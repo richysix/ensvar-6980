@@ -2,7 +2,6 @@
 # /// script
 # requires-python = ">=3.14"
 # dependencies = [
-#     "plotnine>=0.15.3",
 #     "polars>=1.40.1",
 #     "pyarrow>=24.0.0",
 # ]
@@ -12,8 +11,6 @@ import argparse
 import polars as pl
 import datetime as dt
 from typing import TextIO
-import plotnine as p9
-#from great_tables import GT, md, html
 
 def create_empty_job() -> dict:
     return {
@@ -27,7 +24,7 @@ def create_empty_job() -> dict:
 
 def add_job_to_jobinfo(current_job: dict, jobinfo: dict) -> dict:
     for key in current_job.keys():
-        jobinfo[key].append(current_job[key]) # append to list
+        jobinfo[key].append(current_job[key])  # append to list
     return jobinfo
 
 
@@ -54,9 +51,15 @@ def mem_string_to_gb(string: str) -> float:
 
 def convert_data_types(jobinfo: dict) -> dict:
     jobinfo["Job ID"] = [int(item) for item in jobinfo["Job ID"]]
-    jobinfo["CPU Utilized"] = [time_string_to_delta(item) for item in jobinfo["CPU Utilized"]]
-    jobinfo["Job Wall-clock time"] = [time_string_to_delta(item) for item in jobinfo["Job Wall-clock time"]]
-    jobinfo["Memory Utilized"] = [mem_string_to_gb(item) for item in jobinfo["Memory Utilized"]]
+    jobinfo["CPU Utilized"] = [
+        time_string_to_delta(item) for item in jobinfo["CPU Utilized"]
+    ]
+    jobinfo["Job Wall-clock time"] = [
+        time_string_to_delta(item) for item in jobinfo["Job Wall-clock time"]
+    ]
+    jobinfo["Memory Utilized"] = [
+        mem_string_to_gb(item) for item in jobinfo["Memory Utilized"]
+    ]
     return jobinfo
 
 
@@ -99,137 +102,152 @@ def main(args: dict) -> None:
     df_jobinfo = pl.DataFrame(jobinfo)
     df_jobinfo = df_jobinfo.rename({"Memory Utilized": "Memory Utilized (GB)"})
 
-    # load trace file
-    trace = pl.read_csv(
-        args.trace_file,
-        separator="\t",
-        infer_schema_length=10000
-    )
-    # if a job has failed and been rerun the task id won't match in the params file
-    # so we need to group by job name
-    # get the first value for task_id for each job name
-    # rejoin it back to the original trace dataframe
-    # then get rid of the second task id and filter for COMPLETED jobs
-    trace = trace.group_by("name", maintain_order=True
-    ).first(
-    ).select(pl.col("name"), pl.col("task_id")
-    ).join(trace, "name"
-    ).select(pl.all().exclude("task_id_right")
-    ).filter(pl.col("status") == "COMPLETED"
-    )
-
     # load params file
     params = pl.read_csv(
         args.task_params_file,
         separator="\t",
-    )
-    # work out categories
-    buffer_categories = [str(buffer) for buffer in sorted(set(params["buffer_size"].to_list()))]
-    fork_categories = [str(fork) for fork in sorted(set(params["forks"].to_list()))]
-    # reload data with categories
-    params = pl.read_csv(
-        args.task_params_file,
-        separator="\t",
-        schema_overrides={
-            "buffer_size": pl.Enum(buffer_categories),
-            "forks": pl.Enum(fork_categories)
-        }
     ).with_columns(
-        pl.col("sample_id").str.replace(r"^.*\-", "")
+        pl.col("options").str.replace(r"^\-\-", "").fill_null("None"),
+        variant_type = pl.col("sample_id").str.replace(r"^.*\-", ""),
     )
 
-    # join all 3 together
-    df_all = params.join(
-        trace, on="task_id"
-    ).join(
-        df_jobinfo,
-        left_on="native_id",
-        right_on="Job ID"
-    )
+    # load trace file
+    trace = pl.read_csv(args.trace_file, separator="\t", infer_schema_length=10000)
+
+    # figure out how to join the tables
+    # if the params file has the SLURM job id it is easy
+    if "job_id" in params.columns:
+        df_all = (
+            trace
+            .join(params, left_on="native_id", right_on="job_id")
+            .join(df_jobinfo, left_on="native_id", right_on="Job ID")
+        )
+    else:
+        # if a job has failed and been rerun the task id won't match in the params file
+        # so we need to group by job name
+        # get the first value for task_id for each job name
+        # rejoin it back to the original trace dataframe
+        # then get rid of the second task id and filter for COMPLETED jobs
+        original_col_order = trace.columns
+        trace = (
+            trace.group_by("name", maintain_order=True)
+            .first()
+            .select(pl.col("name"), pl.col("task_id"))
+            .join(trace, "name")
+            .select(original_col_order)
+            .filter(pl.col("status") == "COMPLETED")
+        )
+
+        # join all 3 together
+        df_all = trace.join(params, on="task_id").join(
+            df_jobinfo, left_on="native_id", right_on="Job ID"
+        )
+
     # output combined table
     (
-        df_all
-            .with_columns(pl.col(pl.Duration).dt.to_string(format="polars"))
-            .write_csv(f"{args.output_base}-results.tsv", separator="\t")
-    )
-
-    # plot time amd mem stats
-    time_boxplot = (
-        p9.ggplot(data=df_all,
-            mapping=p9.aes(x="buffer_size", y="Job Wall-clock time", fill="factor(options, categories=('None', '--everything'))"))
-            + p9.geom_boxplot(outlier_shape="")
-            + p9.geom_point(position=p9.position_dodge2(width=0.5))
-            + p9.scale_fill_manual(name="Options", values=("#0073B3", "#CC6600"))
-            + p9.facet_wrap("forks")
-            + p9.theme(legend_position=(0.9, 0.25))
-    )
-
-    time_boxplot.save(
-        f"{args.output_base}.time.png",
-        width=6,
-        height=4,
-        dpi=200
-    )
-
-    mem_boxplot = (
-        p9.ggplot(data=df_all,
-            mapping=p9.aes(x="buffer_size", y="Memory Utilized (GB)", fill="factor(options, categories=('None', '--everything'))"))
-            + p9.geom_boxplot(outlier_shape="")
-            + p9.geom_point(position=p9.position_dodge2(width=0.5))
-            + p9.scale_fill_manual(name="Options", values=("#0073B3", "#CC6600"))
-            + p9.facet_wrap("forks")
-    )
-    mem_boxplot.save(
-        f"{args.output_base}.mem.png",
-        width=6,
-        height=4,
-        dpi=200
+        df_all.with_columns(
+            pl.col(pl.Duration).dt.to_string(format="polars")
+        ).write_csv(f"{args.output_base}-results.tsv", separator="\t")
     )
 
     time_table = (
-        df_all
-            .group_by(("sample_id", "buffer_size", "forks", "options"))
-            .agg(
-                pl.min("Job Wall-clock time").alias("Min(time)").dt.to_string("polars"),
-                pl.median("Job Wall-clock time").alias("Median(time)").dt.total_seconds(fractional=True).round(0, mode="half_away_from_zero").mul(1_000_000).cast(pl.Duration("us")).dt.to_string("polars"),
-                pl.max("Job Wall-clock time").alias("Max(time)").dt.to_string("polars")
-            )
-            .sort("sample_id", "buffer_size", "forks")
+        df_all.group_by(("variant_type", "buffer_size", "forks", "options"))
+        .agg(
+            pl.min("Job Wall-clock time").alias("Min(time)").dt.to_string("polars"),
+            pl.median("Job Wall-clock time").alias("Median(time)"),
+            pl.max("Job Wall-clock time").alias("Max(time)").dt.to_string("polars"),
+        )
+        .sort("options", "buffer_size", "forks")
     )
-    print(time_table)
-    #GT(time_table)
+    for option in ("None", "everything"):
+        # extract baseline runtime value
+        baseline_time = (
+            time_table
+            .filter(pl.col("buffer_size") == 5000, pl.col("forks") == 1, pl.col("options") == option)
+            .select("Median(time)")
+            .item()
+        )
+        # subset to option and
+        # subtract baseline time from table
+        (
+            time_table
+            .filter(pl.col("options") == option)
+            .with_columns(
+                (pl.col("Median(time)") - baseline_time).alias("Delta (Time)")
+            )
+            .with_columns(
+                pl.col(pl.Duration)
+                .dt.total_seconds(fractional=True)
+                .round(0, mode="half_away_from_zero")
+                .mul(1_000_000)
+                .cast(pl.Duration("us"))
+                .dt.to_string("polars"),
+            )
+        ).write_csv(f"{args.output_base}-time-delta-{option}-results.tsv", separator="\t")
 
     mem_table = (
-        df_all
-            .group_by(("sample_id", "buffer_size", "forks", "options"))
-            .agg(
-                pl.min("Memory Utilized (GB)").alias("Min(mem)"),
-                pl.median("Memory Utilized (GB)").alias("Median(mem)"),
-                pl.max("Memory Utilized (GB)").alias("Max(mem)")
-            )
-            .sort("sample_id", "buffer_size", "forks")
+        df_all.group_by(("variant_type", "buffer_size", "forks", "options"))
+        .agg(
+            pl.min("Memory Utilized (GB)").alias("Min(mem)"),
+            pl.median("Memory Utilized (GB)").alias("Median(mem)")
+            .round(2, mode="half_away_from_zero"),
+            pl.max("Memory Utilized (GB)").alias("Max(mem)"),
+        )
+        .sort("options", "buffer_size", "forks")
     )
-    print(mem_table)
+    for option in ("None", "everything"):
+        # extract baseline memory value
+        baseline_mem = (
+            mem_table
+            .filter(pl.col("buffer_size") == 5000, pl.col("forks") == 1, pl.col("options") == option)
+            .select("Median(mem)")
+            .item()
+        )
+        # subset to option and
+        # subtract baseline mem from table
+        (
+            mem_table
+            .filter(pl.col("options") == option)
+            .with_columns(
+                (pl.col("Median(mem)") - baseline_mem)
+                .round(1, mode="half_away_from_zero")
+                .alias("Delta (mem)")
+            )
+        ).write_csv(f"{args.output_base}-mem-delta-{option}-results.tsv", separator="\t")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Script to plot time and memory usage',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Script to join the outputs from the benchmarking pipeline and produce a summary file",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument('trace_file', metavar='TRACE_FILE',
-        type=str, default='reports/trace.txt',
-        help='Input trace file')
-    parser.add_argument('task_params_file', metavar='TASK_PARAMS_FILE',
-        type=str, default='reports/task-params.tsv',
-        help='Input task parameters file')
-    parser.add_argument('seff_file', metavar='SEFF_FILE',
-        type=str, default='reports/output.seff',
-        help='Input seff file')
-    parser.add_argument('--output_base', metavar='OUTFILE_BASE',
-        type=str, default="time-mem",
-        help='Base file name for the output files')
-    parser.add_argument('--debug', action='count', default=0,
-        help='Prints debugging information')
+    parser.add_argument(
+        "trace_file",
+        metavar="TRACE_FILE",
+        type=str,
+        help="Input trace file",
+    )
+    parser.add_argument(
+        "task_params_file",
+        metavar="TASK_PARAMS_FILE",
+        type=str,
+        help="Input task parameters file",
+    )
+    parser.add_argument(
+        "seff_file",
+        metavar="SEFF_FILE",
+        type=str,
+        help="Input seff file",
+    )
+    parser.add_argument(
+        "--output_base",
+        metavar="OUTFILE_BASE",
+        type=str,
+        default="time-mem",
+        help="Base file name for the output files",
+    )
+    parser.add_argument(
+        "--debug", action="count", default=0, help="Prints debugging information"
+    )
     params = parser.parse_args()
     main(params)
