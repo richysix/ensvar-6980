@@ -32,8 +32,13 @@ def add_job_to_jobinfo(current_job: dict, jobinfo: dict) -> dict:
 
 
 def time_string_to_delta(string: str) -> dt.timedelta:
-    h, m, s = [int(x) for x in string.split(":")]
-    return dt.timedelta(hours=h, minutes=m, seconds=s)
+    h, m, s = string.split(":")
+    if "-" in h:
+        d, h = h.split("-")
+    else:
+        d = 0
+    (d, h, m, s) = (int(x) for x in (d, h, m, s))
+    return dt.timedelta(days=d, hours=h, minutes=m, seconds=s)
 
 
 def mem_string_to_gb(string: str) -> float:
