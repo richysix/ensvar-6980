@@ -100,7 +100,23 @@ def main(args: dict) -> None:
     df_jobinfo = df_jobinfo.rename({"Memory Utilized": "Memory Utilized (GB)"})
 
     # load trace file
-    trace = pl.read_csv(args.trace_file, separator="\t")
+    trace = pl.read_csv(
+        args.trace_file,
+        separator="\t",
+        infer_schema_length=10000
+    )
+    # if a job has failed and been rerun the task id won't match in the params file
+    # so we need to group by job name
+    # get the first value for task_id for each job name
+    # rejoin it back to the original trace dataframe
+    # then get rid of the second task id and filter for COMPLETED jobs
+    trace = trace.group_by("name", maintain_order=True
+    ).first(
+    ).select(pl.col("name"), pl.col("task_id")
+    ).join(trace, "name"
+    ).select(pl.all().exclude("task_id_right")
+    ).filter(pl.col("status") == "COMPLETED"
+    )
 
     # load params file
     params = pl.read_csv(
@@ -137,8 +153,6 @@ def main(args: dict) -> None:
             .write_csv(f"{args.output_base}-results.tsv", separator="\t")
     )
 
-#    df_subset = df_all.filter(pl.col("sample_id") == "NA12878-chr1")
-
     # plot time amd mem stats
     time_boxplot = (
         p9.ggplot(data=df_all,
@@ -147,6 +161,7 @@ def main(args: dict) -> None:
             + p9.geom_point(position=p9.position_dodge2(width=0.5))
             + p9.scale_fill_manual(name="Options", values=("#0073B3", "#CC6600"))
             + p9.facet_wrap("forks")
+            + p9.theme(legend_position=(0.9, 0.25))
     )
 
     time_boxplot.save(
