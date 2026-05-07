@@ -27,7 +27,7 @@ process ENSEMBLVEP_VEP {
     def reference = fasta ? "--fasta ${fasta}" : ""
     def option_string = options == "" ? "None" : options
     """
-    echo -e "${task.index}\t${iter}\t\$SLURM_JOB_NODELIST\t${meta.id}\t${buffer_size}\t${forks}\t${option_string}" > task-${task.index}-${iter}-params.tsv
+    echo -e "${task.index}\t${iter}\t\$SLURM_JOB_ID\t\$SLURM_JOB_NODELIST\t${meta.id}\t${buffer_size}\t${forks}\t${option_string}" > task-${task.index}-${iter}-params.tsv
 
     vep ${args} ${options} \\
         --input_file ${vcf} \\
@@ -48,7 +48,7 @@ process ENSEMBLVEP_VEP {
     stub:
     def option_string = options == "" ? "None" : options
     """
-    echo -e "${task.index}\t${iter}\t\$SLURM_JOB_NODELIST\t${meta.id}\t${buffer_size}\t${forks}\t${option_string}" > task-${task.index}-${iter}-params.tsv
+    echo -e "${task.index}\t${iter}\t\$SLURM_JOB_ID\t\$SLURM_JOB_NODELIST\t${meta.id}\t${buffer_size}\t${forks}\t${option_string}" > task-${task.index}-${iter}-params.tsv
     touch "${meta.id}.vep.vcf.gz" "${meta.id}.vep.out"
     """
 }
@@ -65,7 +65,7 @@ process COLLECT_PARAMS_DATA {
 
     script:
     """
-    cat <( echo -e "task_id\titeration\tnode\tsample_id\tbuffer_size\tforks\toptions" ) task-*-params.tsv > task-params.tsv
+    cat <( echo -e "task_id\titeration\tjob_id\tnode\tsample_id\tbuffer_size\tforks\toptions" ) task-*-params.tsv > task-params.tsv
     """
 }
 
