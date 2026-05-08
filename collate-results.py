@@ -173,7 +173,10 @@ def main(args: dict) -> None:
             time_table
             .filter(pl.col("options") == option)
             .with_columns(
-                (pl.col("Median(time)") - baseline_time).alias("Delta (Time)")
+                (pl.col("Median(time)") - baseline_time).alias("Delta (Time)"),
+                (baseline_time/pl.col("Median(time)"))
+                .round(1, mode="half_away_from_zero")
+                .alias("x Speed up")
             )
             .with_columns(
                 pl.col(pl.Duration)
@@ -211,7 +214,10 @@ def main(args: dict) -> None:
             .with_columns(
                 (pl.col("Median(mem)") - baseline_mem)
                 .round(1, mode="half_away_from_zero")
-                .alias("Delta (mem)")
+                .alias("Delta (mem)"),
+                (baseline_mem/pl.col("Median(mem)"))
+                .round(1, mode="half_away_from_zero")
+                .alias("x Mem")
             )
         ).write_csv(f"{args.output_base}-mem-delta-{option}-results.tsv", separator="\t")
 
