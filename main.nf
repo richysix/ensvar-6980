@@ -1,5 +1,18 @@
 #!/usr/bin/env nextflow
 
+/* 
+AUTHOR 
+Richard White <rich.white@cantab.net>
+
+COPYRIGHT AND LICENSE
+
+This software is Copyright (c) 2026 EMBL-European Bioinformatics Institute
+
+This is free software, licensed under:
+
+Licensed under the Apache License, Version 2.0 (the "License");
+*/
+
 process ENSEMBLVEP_VEP {
     label 'process_medium'
     cpus "${forks}"

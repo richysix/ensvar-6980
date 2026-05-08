@@ -1,5 +1,17 @@
 #!/usr/bin/env Rscript
 
+# AUTHOR
+#
+# Richard White <rich.white@cantab.net>
+#
+# COPYRIGHT AND LICENSE
+#
+# This software is Copyright (c) 2026 EMBL-European Bioinformatics Institute
+#
+# This is free software, licensed under:
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+
 library("optparse")
 
 option_list <- list(
@@ -324,15 +336,3 @@ summary_plot <- all_data |>
     theme(strip.background = element_rect(fill = "#cccccc"))
 
 output_plot(summary_plot, file.path(cmd_line_args$args[1], "time-fold-change.png"))
-
-# AUTHOR
-#
-# Richard White <rich.white@cantab.net>
-#
-# COPYRIGHT AND LICENSE
-#
-# This software is Copyright (c) 2026 EMBL-European Bioinformatics Institute
-#
-# This is free software, licensed under:
-#
-#  The GNU General Public License, Version 3, June 2007
