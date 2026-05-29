@@ -167,6 +167,8 @@ def main(args: dict) -> None:
         .agg(
             pl.min("Job Wall-clock time").alias("Min(time)").dt.to_string("polars"),
             pl.median("Job Wall-clock time").alias("Median(time)"),
+            pl.mean("Job Wall-clock time").alias("Mean(time)"),
+            pl.std("Job Wall-clock time").alias("SD(time)"),
             pl.max("Job Wall-clock time").alias("Max(time)").dt.to_string("polars"),
         )
         .sort("options", "buffer_size", "forks")
