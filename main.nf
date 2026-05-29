@@ -68,7 +68,6 @@ process ENSEMBLVEP_VEP {
 
 process COLLECT_PARAMS_DATA {
     executor 'local'
-    publishDir 'reports', pattern: "task-params.tsv", mode: 'copy'
 
     input:
     path("task-*-params.tsv")
